@@ -1,0 +1,10 @@
+<?php
+try {
+    $dsn = 'mysql:dbname=appointment_system;host=127.0.0.1';
+    $PDO = new PDO($dsn, 'appointment_system', 'adminhlkj99'); // 请根据实际情况修改用户名和密码
+    $PDO->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch (PDOException $e) {
+    echo "数据库连接失败: ". $e->getMessage();
+    die();
+}
+?>
