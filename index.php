@@ -1,9 +1,6 @@
-<!--  在6index.php基础上修改 要让页面根据天气显示下雨、晴天或阴天的背景，你需要获取当前的天气信息，一般可以通过调用第三方天气 API 来实现。这里以和风天气的免费 API 为例，不过使用前你需要去 [和风天气官网](https://dev.qweather.com/) 注册账号并获取 API Key。-->
-
-<!--以下是修改后的代码示例：-->
-
-
+<!--预约主页-->
 <?php
+session_start(); // 开启会话
 include('db.php');
 
 // 获取医生列表
@@ -11,6 +8,17 @@ $sql = "SELECT * FROM doctors";
 $stmt = $PDO->prepare($sql);
 $stmt->execute();
 $doctors = $stmt->fetchAll();
+
+// 检查是否有预约成功的信息
+$showSuccessMessage = false;
+$showErrorMessage = isset($_GET['success']) && $_GET['success'] == 0;
+$errorMessage = $showErrorMessage ? urldecode($_GET['error']) : '';
+
+if (isset($_SESSION['appointment_success']) && $_SESSION['appointment_success']) {
+    $showSuccessMessage = true;
+    // 显示提示框后清除会话变量
+    unset($_SESSION['appointment_success']);
+}
 ?>
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -123,10 +131,103 @@ $doctors = $stmt->fetchAll();
         body.cloudy {
             background-image: url('cloudy.jpg');
         }
+
+        /* 二维码弹出框样式 */
+        #qr-code-popup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+            z-index: 999;
+        }
+
+        #qr-code-popup img {
+            width: 200px;
+            height: 200px;
+        }
+
+        /* 按钮样式 */
+        .additional-button {
+            margin-top: 10px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+
+        .additional-button:hover {
+            background-color: #0056b3;
+        }
+
+        /* 预约成功提示框样式 */
+        #success-message {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: none;
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #success-message-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            text-align: center;
+            position: relative;
+        }
+
+        #close-success-message {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            cursor: pointer;
+        }
+
+        /* 预约失败提示框样式 */
+        #error-message {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #FF5722;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            z-index: 1000;
+            display: none;
+        }
+
+        #close-error-message {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            cursor: pointer;
+        }
     </style>
 </head>
 
 <body>
+    <!-- 预约成功提示框 -->
+    <div id="success-message">
+        <div id="success-message-content">
+            <span id="close-success-message" onclick="hideSuccessMessage()">&times;</span>
+            <h2>预约成功！</h2>
+        </div>
+    </div>
+
+    <!-- 预约失败提示框 -->
+    <div id="error-message">
+        <span id="close-error-message" onclick="hideErrorMessage()">&times;</span>
+        <span id="error-text"></span>
+    </div>
+
     <h2>预约系统</h2>
     <form action="save_appointment.php" method="post">
         <label for="doctor">选择医生:</label>
@@ -151,7 +252,17 @@ $doctors = $stmt->fetchAll();
         <label for="appointment_time">预约时间:</label>
         <input type="datetime-local" name="appointment_time" id="appointment_time" required>
         <input type="submit" value="提交预约">
+
+        <!-- 新增的两个按钮 -->
+        <button class="additional-button" id="scan-qr-button" onclick="showQRCode()">点击这里扫描二维码添加微信</button>
+        <button class="additional-button" id="call-button" onclick="callPhone()">点击这里拨打电话</button>
     </form>
+
+    <!-- 二维码弹出框 -->
+    <div id="qr-code-popup">
+        <img src="uploads/kfwx.jpg" alt="微信二维码">
+        <button id="close-qr-button" onclick="hideQRCode()">关闭</button>
+    </div>
 
     <script>
         // 替换为你自己的和风天气 API Key
@@ -159,6 +270,9 @@ $doctors = $stmt->fetchAll();
         // 这里以北京为例，你可以根据实际情况修改城市代码
         const CITY_ID = '101010100';
         const API_URL = `https://devapi.qweather.com/v7/weather/now?location=${CITY_ID}&key=${API_KEY}`;
+
+        // 管理员预先设置的电话号码 点击按钮“点击这里拨打电话”后自动填入手机拨号盘的号码
+        const ADMIN_PHONE_NUMBER = '17621270725';
 
         function updateDoctorInfo(select) {
             var selectedOption = select.options[select.selectedIndex];
@@ -196,6 +310,47 @@ $doctors = $stmt->fetchAll();
             }
         }
 
+        // 显示二维码弹出框
+        function showQRCode() {
+            document.getElementById('qr-code-popup').style.display = 'block';
+        }
+
+        // 隐藏二维码弹出框
+        function hideQRCode() {
+            document.getElementById('qr-code-popup').style.display = 'none';
+        }
+
+        // 拨打电话  点击 “点击这里拨打电话” 按钮时，会检查是否设置了管理员电话号码，若已设置，就会弹出手机拨号盘并自动填入该号码；若未设置，会弹出提示框。
+        function callPhone() {
+            if (ADMIN_PHONE_NUMBER) {
+                window.location.href = `tel:${ADMIN_PHONE_NUMBER}`;
+            } else {
+                alert('未设置管理员电话号码');
+            }
+        }
+
+        // 显示预约成功提示框
+        function showSuccessMessage() {
+            document.getElementById('success-message').style.display = 'flex';
+        }
+
+        // 隐藏预约成功提示框
+        function hideSuccessMessage() {
+            document.getElementById('success-message').style.display = 'none';
+        }
+
+        // 显示预约失败提示框
+        function showErrorMessage() {
+            const errorText = "<?php echo $errorMessage; ?>";
+            document.getElementById('error-text').textContent = errorText;
+            document.getElementById('error-message').style.display = 'block';
+        }
+
+        // 隐藏预约失败提示框
+        function hideErrorMessage() {
+            document.getElementById('error-message').style.display = 'none';
+        }
+
         fetch(API_URL)
           .then(response => response.json())
           .then(data => {
@@ -205,17 +360,14 @@ $doctors = $stmt->fetchAll();
           .catch(error => {
                 console.error('获取天气信息失败:', error);
             });
+
+        // 页面加载时检查是否显示预约成功或失败提示框
+        if (<?php echo json_encode($showSuccessMessage); ?>) {
+            showSuccessMessage();
+        } else if (<?php echo json_encode($showErrorMessage); ?>) {
+            showErrorMessage();
+        }
     </script>
 </body>
 
 </html>
-
-<!--### 代码说明：-->
-<!--1. **HTML 和 CSS 部分**：-->
-<!--    - 在 CSS 中定义了三种不同天气状态（晴天、下雨、阴天）对应的背景图片类名，分别是 `sunny`、`rainy`、`cloudy`，你需要准备对应的图片文件（`sunny.jpg`、`rainy.jpg`、`cloudy.jpg`）并放在与 HTML 文件相同的目录下。-->
-<!--2. **JavaScript 部分**：-->
-<!--    - 定义了和风天气的 API 请求 URL，你需要将 `API_KEY` 替换为你自己在和风天气官网获取的 API Key，`CITY_ID` 可以根据实际需求修改为对应的城市代码。-->
-<!--    - `setBackgroundBasedOnWeather` 函数根据天气代码来为 `body` 元素添加相应的类名，从而改变背景图片。-->
-<!--    - 使用 `fetch` 方法发送请求获取天气信息，成功后调用 `setBackgroundBasedOnWeather` 函数设置背景，失败则在控制台输出错误信息。-->
-
-<!--通过以上修改，页面会根据当前的天气情况显示不同的背景图片。 -->
